@@ -1,0 +1,11 @@
+{
+    "display_name": "Thinking Glow",
+    "loading_order": 100,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "Seth",
+    "version": "1.2.0",
+    "homePage": ""
+}
