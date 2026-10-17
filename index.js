@@ -304,16 +304,29 @@ function lastMessage() {
     return node;
 }
 
-function hasVisibleText(mes) {
-    const txt = mes?.querySelector('.mes_text')?.textContent ?? '';
-    return !/^[\s.…]*$/.test(txt);
+const textOf = mes => mes?.querySelector('.mes_text')?.textContent ?? '';
+const isVisible = txt => !/^[\s.…]*$/.test(txt);
+
+// Snapshot of the last bot message when generation started (for swipes and continues,
+// SillyTavern reuses that bubble while it still shows the old text).
+let startMesId = null;
+let startText = '';
+
+// The bot bubble this generation is writing into, if it exists yet.
+function targetBubble() {
+    const mes = lastMessage();
+    if (!mes) return null;
+    if (mes.getAttribute('is_user') === 'true' || mes.getAttribute('is_system') === 'true') return null;
+    const sameAsStart = startMesId !== null && mes.getAttribute('mesid') === startMesId;
+    return { mes, base: sameAsStart ? startText : '' };
 }
 
-// True once the message being streamed has real, visible text in it.
-function lastMessageHasText() {
-    const mes = lastMessage();
-    if (!mes || mes.getAttribute('is_user') === 'true') return false;
-    return hasVisibleText(mes);
+// True once new, visible text has landed in the bubble being generated.
+function newTextArrived() {
+    const target = targetBubble();
+    if (!target) return false;
+    const txt = textOf(target.mes);
+    return isVisible(txt) && txt !== target.base;
 }
 
 // Fallback: SillyTavern shows a stop button while generating.
@@ -323,19 +336,15 @@ function generationRunning() {
     return getComputedStyle(stop).display !== 'none';
 }
 
-// Put the indicator inside the bot's message once that bubble exists;
-// until then, show it as its own row at the bottom of the chat.
+// Put the indicator inside the bot's message bubble; if that bubble doesn't
+// exist yet, show it as its own row at the bottom of the chat.
 function place() {
     if (!el) return;
     const chat = document.getElementById('chat');
-    const mes = lastMessage();
-    const isBotBubble = mes
-        && mes.getAttribute('is_user') !== 'true'
-        && mes.getAttribute('is_system') !== 'true'
-        && !hasVisibleText(mes);
+    const target = previewMode ? null : targetBubble();
 
-    if (!previewMode && isBotBubble) {
-        const text = mes.querySelector('.mes_text');
+    if (target) {
+        const text = target.mes.querySelector('.mes_text');
         if (text && el.previousElementSibling !== text) {
             text.after(el);
         }
@@ -384,7 +393,7 @@ function show({ preview = false, since = null } = {}) {
             if (elapsed > 10000) hide();
             return;
         }
-        if (gotToken && lastMessageHasText()) return hide();
+        if (newTextArrived()) return hide();
         if (elapsed > 1500 && !generationRunning()) return hide();
         place();
     }, 120);
@@ -406,11 +415,21 @@ function onGenerationStarted(type, _options, dryRun) {
     if (dryRun || type === 'quiet' || !settings().enabled) return;
     clearTimeout(pendingShow);
     gotToken = false;
+
+    const last = lastMessage();
+    if (last && last.getAttribute('is_user') !== 'true' && last.getAttribute('is_system') !== 'true') {
+        startMesId = last.getAttribute('mesid');
+        startText = textOf(last);
+    } else {
+        startMesId = null;
+        startText = '';
+    }
+
     const genStart = Date.now();
     // Wait a beat so fast replies don't get a flash of the indicator.
     pendingShow = setTimeout(() => {
         pendingShow = null;
-        if (gotToken && lastMessageHasText()) return;
+        if (newTextArrived()) return;
         if (!generationRunning()) return;
         show({ since: genStart });
     }, Number(settings().delay) || 0);
