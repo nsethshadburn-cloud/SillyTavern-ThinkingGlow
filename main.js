@@ -3,7 +3,7 @@
 // and hides it the moment visible text starts streaming in (hidden reasoning stays hidden).
 // Loaded by glow.js with a version stamp so browsers never run a stale copy.
 
-const VERSION = '1.4.0';
+const VERSION = '1.6.0';
 
 const MODULE = 'thinking_glow';
 const DEFAULTS = { enabled: true, style: 'morph', speed: 1, delay: 500, showTimer: true, showName: true };
@@ -32,14 +32,10 @@ function settings() {
 
 const save = () => ctx().saveSettingsDebounced();
 
-function escapeHtml(str) {
-    return String(str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
-
 // ---------------------------------------------------------------------------
-// Morph engine: 12 dots that glide between 10 patterns.
+// Morph engine: 12 dots that glide between 11 patterns.
 // Each pattern maps (dot index, time) -> [x, y, radius, alpha, squash].
-// x/y are -1..1, radius is in px at a 26px canvas, squash 1 = round.
+// x/y are -1..1, radius is in px within a 26px box, squash 1 = round.
 // ---------------------------------------------------------------------------
 
 const TAU = Math.PI * 2;
@@ -57,6 +53,19 @@ const only = (n, f) => (i, t) => {
 };
 
 const SQUARE = [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]];
+const smooth = k => k * k * (3 - 2 * k);
+const overshoot = k => 1 + 2.7 * Math.pow(k - 1, 3) + 1.7 * Math.pow(k - 1, 2);
+
+// Pip layouts for dice faces 1-6 on a 3x3 grid.
+const DICE_FACES = [
+    [[0, 0]],
+    [[-1, -1], [1, 1]],
+    [[-1, -1], [0, 0], [1, 1]],
+    [[-1, -1], [1, -1], [-1, 1], [1, 1]],
+    [[-1, -1], [1, -1], [0, 0], [-1, 1], [1, 1]],
+    [[-1, -1], [-1, 0], [-1, 1], [1, -1], [1, 0], [1, 1]],
+];
+const DICE_ORDER = [0, 3, 1, 5, 2, 4];
 
 const PATTERNS = [
     // Bouncing dots (squish on landing)
@@ -119,13 +128,24 @@ const PATTERNS = [
         const lv = C01(h - r);
         return [(c - 1.5) * 0.48, 0.5 - r * 0.5, 1.3 + 0.6 * lv, 0.12 + 0.85 * lv, 1];
     },
-    // Twinkle spiral
-    (i, t) => {
-        const s = 0.85 + 0.15 * Math.sin(t * 2.6);
-        const rr = (0.2 + 0.7 * Math.sqrt((i + 0.5) / N)) * s;
-        const a = i * 2.39996 + t * 1.8;
-        return [Math.cos(a) * rr, Math.sin(a) * rr, 0.9 + 1.1 * (i / N), 0.45 + 0.55 * W01(t * 5 + i * 1.7), 1];
-    },
+    // Leapfrog: the back dot crouches, hops over the others, and lands with a squish
+    only(3, (j, t) => {
+        const T = 0.95;
+        const h = t / T;
+        const n = Math.floor(h);
+        const f = h - n;
+        const rank = (((j - n) % 3) + 3) % 3;
+        const g = C01((f - 0.15) / 0.7);
+        const e = smooth(g);
+        const shift = 0.55 * e;
+        if (rank === 0) {
+            let sq = 1;
+            if (f < 0.15) sq = 1 - 0.28 * Math.sin((Math.PI * f) / 0.15);
+            else if (f > 0.85) sq = 1 - 0.28 * Math.sin((Math.PI * (f - 0.85)) / 0.15);
+            return [-0.55 + 1.65 * e - shift, 0.3 - 0.8 * Math.sin(Math.PI * g), 2.0, 0.95, sq];
+        }
+        return [-0.55 + 0.55 * rank - shift, 0.3, 2.0, 0.95, 1];
+    }),
     // Corner chase
     only(4, (j, t) => {
         const u = (((t * 0.55 + j / 4) % 1) + 1) % 1;
@@ -139,111 +159,198 @@ const PATTERNS = [
         const pop = Math.pow(1 - Math.sin(f * Math.PI), 2);
         return [x * Math.cos(ro) - y * Math.sin(ro), x * Math.sin(ro) + y * Math.cos(ro), 1.5 + 0.8 * pop, 0.95];
     }),
+    // Dice roll: pips tumble from face to face with a little overshoot
+    only(6, (j, t) => {
+        const T = 0.95;
+        const h = t / T;
+        const n = Math.floor(h);
+        const f = h - n;
+        const m = C01((f - 0.55) / 0.45);
+        const A = DICE_FACES[DICE_ORDER[((n % 6) + 6) % 6]];
+        const B = DICE_FACES[DICE_ORDER[(((n + 1) % 6) + 6) % 6]];
+        const pa = A[j % A.length];
+        const pb = B[j % B.length];
+        const aa = j < A.length ? 0.95 : 0;
+        const ab = j < B.length ? 0.95 : 0;
+        const k = overshoot(m);
+        const S = 0.52;
+        const x = (pa[0] + (pb[0] - pa[0]) * k) * S;
+        const y = (pa[1] + (pb[1] - pa[1]) * k) * S;
+        const th = (n * Math.PI) / 2 + (Math.PI / 2) * ease(m);
+        const c = Math.cos(th);
+        const sn = Math.sin(th);
+        return [x * c - y * sn, x * sn + y * c, 1.8 + 0.5 * Math.sin(Math.PI * m), aa + (ab - aa) * ease(m)];
+    }),
 ];
 
 const HOLD = 5.5; // seconds on each pattern
 const FADE = 1.4; // seconds to morph into the next
+const SEG = HOLD + FADE;
+const CYCLE = SEG * PATTERNS.length; // one full trip through every pattern
+const SAMPLES_PER_SEC = 40; // the browser interpolates smoothly between samples
 
-// A glowing dot is drawn once into a small sprite and then stamped for every dot,
-// which is far cheaper than a live canvas blur on every dot every frame.
-const SPRITE_SIZE = 64;
-const SPRITE_CORE = 0.22; // core radius as a fraction of the sprite
-const SPRITE_SCALE = 0.5 / SPRITE_CORE; // sprite half-size relative to the core radius
+// Geometry of the 26px box the dots live in.
+const BOX = 26;
+const MID = BOX / 2;
+const RANGE = BOX / 2 - 3;
+const DOT_CORE = 2.8; // radius of a dot at scale 1, px (at least as big as any dot gets, so it only ever scales down and stays crisp)
+const DOT = DOT_CORE * 2; // size of each dot element, px
 
-function makeSprite(color) {
-    const c = document.createElement('canvas');
-    c.width = SPRITE_SIZE;
-    c.height = SPRITE_SIZE;
-    const g = c.getContext('2d');
-    g.fillStyle = color;
-    g.shadowColor = color;
-    g.shadowBlur = SPRITE_SIZE * 0.16;
-    g.beginPath();
-    g.arc(SPRITE_SIZE / 2, SPRITE_SIZE / 2, SPRITE_SIZE * SPRITE_CORE, 0, TAU);
-    g.fill();
-    return c;
+// Each pattern runs on its own clock, starting when it begins fading in,
+// so the motion is continuous through every morph and across the loop point.
+function localTime(j, tau) {
+    const origin = j * SEG - FADE;
+    return (((tau - origin) % CYCLE) + CYCLE) % CYCLE;
 }
 
-function createMorph(canvas, getColor, getSpeed) {
-    const c2d = canvas.getContext('2d');
-    const p = [0, 0, 0, 0, 0];
-    let raf = 0;
-    let size = 26;
-    let sprite = null;
-    let cur = 0;
-    let nxt = 1;
-    let t0 = 0;
-    let seg0 = 0;
-    let animT = 0;
-    let last = 0;
+function toFrame(p) {
+    const r = Math.max(0.2, p[2]);
+    const sq = p[4];
+    const sx = (r * (2 - sq)) / DOT_CORE;
+    const sy = (r * sq) / DOT_CORE;
+    const cx = MID + p[0] * RANGE;
+    const cy = MID + p[1] * RANGE + r * (1 - sq);
+    return {
+        transform: `translate(${(cx - DOT / 2).toFixed(2)}px,${(cy - DOT / 2).toFixed(2)}px) scale(${sx.toFixed(3)},${sy.toFixed(3)})`,
+        opacity: Number(C01(p[3]).toFixed(3)),
+    };
+}
 
-    function resize() {
-        const dpr = Math.min(window.devicePixelRatio || 1, 2);
-        size = canvas.clientWidth || 26;
-        canvas.width = Math.round(size * dpr);
-        canvas.height = Math.round(size * dpr);
-        c2d.setTransform(dpr, 0, 0, dpr, 0, 0);
+// Precompute the whole cycle once. The result is handed to the browser's compositor,
+// which plays it at the screen's refresh rate without touching the main thread,
+// so SillyTavern doing work (or a heavy theme) can't make it stutter.
+// The work is done in small slices while the page is idle, so loading never hitches.
+let keyframeCache = null;
+let kfJob = null;
+
+function stepKeyframes(keepGoing) {
+    if (keyframeCache) return true;
+    if (!kfJob) {
+        const frames = Math.round(CYCLE * SAMPLES_PER_SEC);
+        kfJob = { f: 0, frames, out: Array.from({ length: N }, () => new Array(frames + 1)) };
     }
-
-    function draw(t, k) {
-        const s = size / 26;
-        const R = size / 2 - 3 * s;
-        const m = size / 2;
-        c2d.clearRect(0, 0, size, size);
-        for (let i = 0; i < N; i++) {
-            const a = PATTERNS[cur](i, t);
-            if (k > 0) {
-                const b = PATTERNS[nxt](i, t);
-                for (let j = 0; j < 5; j++) p[j] = a[j] + (b[j] - a[j]) * k;
-            } else {
-                for (let j = 0; j < 5; j++) p[j] = a[j];
-            }
-            const alpha = C01(p[3]);
-            if (alpha < 0.01) continue;
-            const r = Math.max(0.2, p[2]) * s;
-            const sq = p[4];
-            const rx = r * (2 - sq) * SPRITE_SCALE;
-            const ry = r * sq * SPRITE_SCALE;
-            const cx = m + p[0] * R;
-            const cy = m + p[1] * R + r * (1 - sq);
-            c2d.globalAlpha = alpha;
-            c2d.drawImage(sprite, cx - rx, cy - ry, rx * 2, ry * 2);
-        }
-    }
-
-    function frame(now) {
-        const dt = last ? Math.min(0.1, (now - last) / 1000) : 0;
-        last = now;
-        animT += dt * (getSpeed() || 1);
-        const t = (now - t0) / 1000;
-        let sg = t - seg0;
-        while (sg > HOLD + FADE) {
-            cur = nxt;
-            nxt = (nxt + 1) % PATTERNS.length;
-            seg0 += HOLD + FADE;
-            sg = t - seg0;
-        }
+    const { frames, out } = kfJob;
+    const P = PATTERNS.length;
+    const mix = [0, 0, 0, 0, 0];
+    while (kfJob.f <= frames) {
+        const f = kfJob.f++;
+        const tau = ((f / frames) * CYCLE) % CYCLE;
+        const seg = Math.min(P - 1, Math.floor(tau / SEG));
+        const sg = tau - seg * SEG;
         const k = sg > HOLD ? ease((sg - HOLD) / FADE) : 0;
-        draw(animT, k);
-        raf = requestAnimationFrame(frame);
+        const next = (seg + 1) % P;
+        const tCur = localTime(seg, tau);
+        const tNext = localTime(next, tau);
+        for (let i = 0; i < N; i++) {
+            const a = PATTERNS[seg](i, tCur);
+            if (k > 0) {
+                const b = PATTERNS[next](i, tNext);
+                for (let m = 0; m < 5; m++) mix[m] = a[m] + (b[m] - a[m]) * k;
+            } else {
+                for (let m = 0; m < 5; m++) mix[m] = a[m];
+            }
+            out[i][f] = toFrame(mix);
+        }
+        if ((f & 31) === 31 && !keepGoing()) return false;
     }
+    keyframeCache = out;
+    kfJob = null;
+    return true;
+}
+
+function buildKeyframes() {
+    stepKeyframes(() => true);
+    return keyframeCache;
+}
+
+function prebuildWhenIdle() {
+    const idle = window.requestIdleCallback
+        ? cb => window.requestIdleCallback(cb, { timeout: 4000 })
+        : cb => setTimeout(() => cb({ timeRemaining: () => 8 }), 200);
+    const work = deadline => {
+        if (!stepKeyframes(() => deadline.timeRemaining() > 2)) idle(work);
+    };
+    idle(work);
+}
+
+// Starting patterns are dealt from a shuffled deck: every pattern comes up once before any
+// repeats, a new deck never opens with the one you just saw, and the deck survives reloads.
+const DECK_KEY = 'thinking_glow_deck';
+let deck = [];
+let lastStart = -1;
+try {
+    const saved = JSON.parse(localStorage.getItem(DECK_KEY) || 'null');
+    if (saved && Array.isArray(saved.deck)) {
+        deck = saved.deck.filter(i => Number.isInteger(i) && i >= 0 && i < PATTERNS.length);
+        lastStart = Number.isInteger(saved.lastStart) ? saved.lastStart : -1;
+    }
+} catch {
+    // Storage unavailable; the deck just starts fresh.
+}
+
+function nextStartPattern() {
+    if (!deck.length) {
+        deck = PATTERNS.map((_, i) => i);
+        for (let i = deck.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [deck[i], deck[j]] = [deck[j], deck[i]];
+        }
+        // Cards are drawn from the end; don't open the new deck with the last one shown.
+        if (deck.length > 1 && deck[deck.length - 1] === lastStart) {
+            [deck[0], deck[deck.length - 1]] = [deck[deck.length - 1], deck[0]];
+        }
+    }
+    lastStart = deck.pop();
+    try {
+        localStorage.setItem(DECK_KEY, JSON.stringify({ deck, lastStart }));
+    } catch {
+        // Ignore storage errors.
+    }
+    return lastStart;
+}
+
+function createMorph(node, getSpeed) {
+    const dots = [];
+    for (let i = 0; i < N; i++) {
+        const d = document.createElement('i');
+        d.className = 'tg-dot';
+        node.appendChild(d);
+        dots.push(d);
+    }
+    let anims = null;
 
     return {
         start() {
-            cancelAnimationFrame(raf);
-            resize();
-            sprite = makeSprite(getColor() || '#AFA9EC');
-            cur = Math.floor(Math.random() * PATTERNS.length);
-            nxt = (cur + 1) % PATTERNS.length;
-            t0 = performance.now();
-            seg0 = -2; // first change comes a little sooner
-            animT = 0;
-            last = 0;
-            raf = requestAnimationFrame(frame);
+            const rate = Number(getSpeed()) || 1;
+            if (typeof node.animate !== 'function') {
+                // Very old browser: show a still frame instead of nothing.
+                const kf = buildKeyframes();
+                dots.forEach((d, i) => Object.assign(d.style, kf[i][0]));
+                return;
+            }
+            const kf = buildKeyframes();
+            if (!anims) {
+                anims = dots.map((d, i) => d.animate(kf[i], {
+                    duration: CYCLE * 1000,
+                    iterations: Infinity,
+                    easing: 'linear',
+                }));
+            }
+            // Next pattern from the shuffled deck; the first change comes a little sooner.
+            const startAt = (nextStartPattern() * SEG + 2) * 1000;
+            for (const a of anims) {
+                a.pause();
+                a.currentTime = startAt;
+                a.playbackRate = rate;
+            }
+            for (const a of anims) a.play();
         },
         stop() {
-            cancelAnimationFrame(raf);
-            raf = 0;
+            anims?.forEach(a => a.pause());
+        },
+        setSpeed(v) {
+            const rate = Number(v) || 1;
+            anims?.forEach(a => { a.playbackRate = rate; });
         },
     };
 }
@@ -252,6 +359,8 @@ function createMorph(canvas, getColor, getSpeed) {
 // Indicator
 // ---------------------------------------------------------------------------
 
+let morphNode = null;
+
 function animMarkup(style) {
     if (style === 'dots') {
         return '<div class="tg-anim tg-dots"><span></span><span></span><span></span></div>';
@@ -259,10 +368,7 @@ function animMarkup(style) {
     if (style === 'shimmer') {
         return '<div class="tg-anim tg-spark"></div>';
     }
-    if (style === 'orb') {
-        return '<div class="tg-anim tg-orb"><div class="tg-orb-core"></div><div class="tg-orb-ring"></div></div>';
-    }
-    return '<canvas class="tg-anim tg-morph"></canvas>';
+    return '<div class="tg-anim tg-orb"><div class="tg-orb-core"></div><div class="tg-orb-ring"></div></div>';
 }
 
 function build() {
@@ -275,24 +381,40 @@ function build() {
         el.setAttribute('aria-live', 'polite');
     }
     morph?.stop();
-    morph = null;
 
     el.dataset.style = s.style;
-    const name = ctx().name2 || 'Bot';
-    const label = s.showName ? `${escapeHtml(name)} is thinking` : 'Thinking';
-    el.innerHTML = `${animMarkup(s.style)}<span class="tg-label">${label}</span>`
-        + (s.showTimer ? '<span class="tg-timer">0s</span>' : '');
-    lastSecond = -1;
+    el.textContent = '';
 
-    const canvas = el.querySelector('canvas.tg-morph');
-    if (canvas) {
-        morph = createMorph(
-            canvas,
-            () => getComputedStyle(el).getPropertyValue('--tg-accent').trim(),
-            () => settings().speed,
-        );
+    let anim;
+    if (s.style === 'morph') {
+        if (!morphNode) {
+            morphNode = document.createElement('div');
+            morphNode.className = 'tg-anim tg-morph';
+            morph = createMorph(morphNode, () => settings().speed);
+        }
+        anim = morphNode;
+    } else {
+        const holder = document.createElement('div');
+        holder.innerHTML = animMarkup(s.style);
+        anim = holder.firstElementChild;
     }
+    el.appendChild(anim);
+
+    const label = document.createElement('span');
+    label.className = 'tg-label';
+    label.textContent = s.showName ? `${ctx().name2 || 'Bot'} is thinking` : 'Thinking';
+    el.appendChild(label);
+
+    if (s.showTimer) {
+        const timer = document.createElement('span');
+        timer.className = 'tg-timer';
+        timer.textContent = '0s';
+        el.appendChild(timer);
+    }
+    lastSecond = -1;
 }
+
+const startAnimation = () => { if (settings().style === 'morph') morph?.start(); };
 
 function fmt(sec) {
     if (sec < 60) return `${sec}s`;
@@ -354,6 +476,8 @@ function newTextArrived() {
 function generationRunning() {
     const stop = document.getElementById('mes_stop');
     if (!stop) return true;
+    // SillyTavern toggles this with an inline style; reading it avoids forcing a style recalc.
+    if (stop.style.display) return stop.style.display !== 'none';
     return getComputedStyle(stop).display !== 'none';
 }
 
@@ -402,7 +526,7 @@ function show({ preview = false, since = null } = {}) {
     place();
     void el.offsetWidth; // restart the fade-in
     el.classList.remove('tg-hidden');
-    morph?.start();
+    startAnimation();
 
     clearInterval(tick);
     tick = setInterval(() => {
@@ -486,7 +610,7 @@ function addSettingsUI() {
                 <label class="checkbox_label"><input type="checkbox" id="tg_enabled"> Enabled</label>
                 <label for="tg_style">Animation</label>
                 <select id="tg_style" class="text_pole">
-                    <option value="morph">Morphing dots (10 patterns)</option>
+                    <option value="morph">Morphing dots (11 patterns)</option>
                     <option value="orb">Moon orb</option>
                     <option value="dots">Bouncing dots</option>
                     <option value="shimmer">Shimmer text</option>
@@ -505,7 +629,7 @@ function addSettingsUI() {
 
     const speedOut = () => $('#tg_speed_out').text(`${Number(s.speed).toFixed(1)}x`);
     const delayOut = () => $('#tg_delay_out').text(`${(Number(s.delay) / 1000).toFixed(1)}s`);
-    const rebuildIfActive = () => { if (active) { build(); place(); morph?.start(); } };
+    const rebuildIfActive = () => { if (active) { build(); place(); startAnimation(); } };
 
     $('#tg_enabled').prop('checked', s.enabled).on('change', function () {
         s.enabled = this.checked; save();
@@ -516,6 +640,7 @@ function addSettingsUI() {
     });
     $('#tg_speed').val(s.speed).on('input', function () {
         s.speed = Number(this.value); speedOut(); save();
+        morph?.setSpeed(s.speed);
     });
     speedOut();
     $('#tg_delay').val(s.delay).on('input', function () {
@@ -543,4 +668,7 @@ jQuery(() => {
     }
 
     addSettingsUI();
+
+    // Precompute the animation in idle moments so the first reply doesn't wait on it.
+    prebuildWhenIdle();
 });

@@ -9,7 +9,7 @@ In SillyTavern open Extensions → Install extension and paste this repo's URL.
 
 ## Settings
 Extensions panel → Thinking Glow (the panel header shows the running version):
-- Animation: Morphing dots (default — 12 dots that glide between 10 patterns, starting on a random one), Moon orb, Bouncing dots, or Shimmer text
+- Animation: Morphing dots (default — 12 dots that glide between 11 patterns, starting on a random one), Moon orb, Bouncing dots, or Shimmer text
 - Speed: 0.6x to 1.8x
 - Show after: delay before it appears (default 0.5s), so fast replies don't flash it
 - Show elapsed time

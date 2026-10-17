@@ -18,6 +18,7 @@
     color: var(--tg-text);
     font-size: 0.9em;
     pointer-events: none;
+    contain: layout style;
     transition: opacity 0.25s ease, transform 0.25s ease;
 }
 
@@ -49,12 +50,29 @@
 }
 
 .tg-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0.85; }
-.tg-timer { opacity: 0.55; font-variant-numeric: tabular-nums; font-size: 0.9em; }
+.tg-timer { opacity: 0.55; font-variant-numeric: tabular-nums; font-size: 0.9em; min-width: 2.6em; }
 
 .tg-anim { position: relative; flex: none; }
 
-/* Morphing dots */
-.tg-morph { display: block; width: 26px; height: 26px; }
+/* Morphing dots: solid dots, each its own compositor layer, animated off the main thread */
+.tg-morph {
+    position: relative;
+    width: 26px;
+    height: 26px;
+    contain: strict;
+}
+.tg-dot {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 5.6px;
+    height: 5.6px;
+    border-radius: 50%;
+    opacity: 0;
+    transform-origin: 50% 50%;
+    will-change: transform, opacity;
+    background: var(--tg-accent);
+}
 
 /* Moon orb */
 .tg-orb { width: 22px; height: 22px; }
