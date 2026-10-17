@@ -297,11 +297,12 @@ function fmt(sec) {
 }
 
 function lastMessage() {
-    const chat = document.getElementById('chat');
-    if (!chat) return null;
-    let node = chat.lastElementChild;
-    while (node && !node.classList.contains('mes')) node = node.previousElementSibling;
-    return node;
+    // SillyTavern marks the newest message with .last_mes; themes may wrap messages
+    // in extra layers, so search the whole chat rather than only its direct children.
+    const marked = document.querySelector('#chat .mes.last_mes');
+    if (marked) return marked;
+    const all = document.querySelectorAll('#chat .mes');
+    return all.length ? all[all.length - 1] : null;
 }
 
 const textOf = mes => mes?.querySelector('.mes_text')?.textContent ?? '';
