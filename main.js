@@ -3,7 +3,7 @@
 // and hides it the moment visible text starts streaming in (hidden reasoning stays hidden).
 // Loaded by glow.js with a version stamp so browsers never run a stale copy.
 
-const VERSION = '1.7.0';
+const VERSION = '1.8.0';
 
 const MODULE = 'thinking_glow';
 const DEFAULTS = { enabled: true, style: 'morph', speed: 1, delay: 500, rotateWords: true, wordSeconds: 4, showTimer: true, showName: true };
@@ -33,7 +33,7 @@ function settings() {
 const save = () => ctx().saveSettingsDebounced();
 
 // ---------------------------------------------------------------------------
-// Morph engine: 12 dots that glide between 11 patterns.
+// Morph engine: 12 dots that glide between 16 patterns.
 // Each pattern maps (dot index, time) -> [x, y, radius, alpha, squash].
 // x/y are -1..1, radius is in px within a 26px box, squash 1 = round.
 // ---------------------------------------------------------------------------
@@ -66,6 +66,29 @@ const DICE_FACES = [
     [[-1, -1], [-1, 0], [-1, 1], [1, -1], [1, 0], [1, 1]],
 ];
 const DICE_ORDER = [0, 3, 1, 5, 2, 4];
+
+const lerp = (a, b, k) => a + (b - a) * k;
+const mod = (a, b) => ((a % b) + b) % b;
+const frac = x => x - Math.floor(x);
+const bump = (x, c, w) => Math.exp(-Math.pow((x - c) / w, 2));
+const easeOut = k => 1 - Math.pow(1 - k, 3);
+const easeIn = k => k * k * k;
+
+// Shell game: the swaps each round, as pairs of cup slots.
+const SHELL_SWAPS = [[0, 1], [1, 2], [0, 2], [0, 1], [1, 2], [0, 2], [1, 2], [0, 1], [0, 2]];
+
+// Pinball: bumper positions and the order the ball visits them.
+const BUMPERS = [[-0.5, -0.32], [0.5, -0.32], [0, 0.48]];
+const BUMPER_ORDER = [0, 1, 2, 1, 0, 2];
+
+// Ping pong: where the ball is vertically at time t.
+const pongY = t => 0.42 * Math.sin(2.3 * t);
+
+// Tic-tac-toe: two scripted games. m = cells in move order (X first), w = winning moves.
+const TTT_GAMES = [
+    { m: [4, 1, 0, 8, 6, 3, 2], w: [0, 4, 6] },
+    { m: [0, 4, 8, 2, 6, 3, 7], w: [2, 4, 6] },
+];
 
 const PATTERNS = [
     // Bouncing dots (squish on landing)
@@ -181,6 +204,103 @@ const PATTERNS = [
         const sn = Math.sin(th);
         return [x * c - y * sn, x * sn + y * c, 1.8 + 0.5 * Math.sin(Math.PI * m), aa + (ab - aa) * ease(m)];
     }),
+    // Shell game: peek at the ball under the middle cup, then shuffle the cups (the ball really moves with its cup)
+    only(4, (j, t) => {
+        const h = t / 3.3;
+        const n = Math.floor(h);
+        const p = h - n;
+        const X = slotIndex => (slotIndex - 1) * 0.62;
+        const swap = g => SHELL_SWAPS[mod(g, SHELL_SWAPS.length)];
+        const slot = [0, 1, 2];
+        const k = p < 0.26 ? 0 : Math.min(5, Math.floor(((p - 0.26) / 0.7) * 5));
+        const done = n * 5 + k;
+        for (let g = 0; g < done; g++) {
+            const [a, b] = swap(g);
+            const ca = slot.indexOf(a);
+            const cb = slot.indexOf(b);
+            slot[ca] = b;
+            slot[cb] = a;
+        }
+        const pos = cup => {
+            let x = X(slot[cup]);
+            let y = 0.15;
+            if (p >= 0.26 && k < 5) {
+                const f = ease(((p - 0.26) / 0.7) * 5 - k);
+                const [a, b] = swap(done);
+                if (slot[cup] === a) {
+                    x = lerp(X(a), X(b), f);
+                    y = 0.15 - 0.34 * Math.sin(Math.PI * f);
+                } else if (slot[cup] === b) {
+                    x = lerp(X(b), X(a), f);
+                    y = 0.15 + 0.2 * Math.sin(Math.PI * f);
+                }
+            }
+            return [x, y];
+        };
+        const lift = Math.sin(Math.PI * C01(p / 0.22));
+        if (j < 3) {
+            const [x, y] = pos(j);
+            return [x, y - (j === 1 ? 0.5 * lift : 0), 2.3, 0.95, 0.8];
+        }
+        const [x] = pos(1);
+        return [x, 0.32, 1.15, 0.95 * lift];
+    }),
+    // Ping pong: two paddles track the ball and the ball squishes on every hit
+    only(3, (j, t) => {
+        const T = 1.25;
+        const p = frac(t / T);
+        if (j === 0) {
+            const a = T * Math.floor(t / T);
+            const kick = Math.max(bump(p, 0, 0.05), bump(p, 1, 0.05));
+            return [-0.85 - 0.05 * kick, lerp(pongY(a), pongY(a + T), smooth((t - a) / T)), 1.6, 0.8, 1.75];
+        }
+        if (j === 1) {
+            const a = T * (Math.floor(t / T - 0.5) + 0.5);
+            return [0.85 + 0.05 * bump(p, 0.5, 0.05), lerp(pongY(a), pongY(a + T), smooth((t - a) / T)), 1.6, 0.8, 1.75];
+        }
+        const tri = p < 0.5 ? p * 2 : 2 - p * 2;
+        const hit = Math.max(bump(p, 0, 0.04), bump(p, 1, 0.04), bump(p, 0.5, 0.04));
+        return [-0.62 + 1.24 * tri, pongY(t), 1.5, 0.95, 1 + 0.35 * hit];
+    }),
+    // Pinball: the ball ricochets between three bumpers that flash when hit
+    only(4, (j, t) => {
+        const h = t / 0.42;
+        const n = Math.floor(h);
+        const f = h - n;
+        const a = BUMPER_ORDER[mod(n, BUMPER_ORDER.length)];
+        const b = BUMPER_ORDER[mod(n + 1, BUMPER_ORDER.length)];
+        if (j < 3) {
+            const pop = a === j ? Math.exp(-f * 5) : 0;
+            return [BUMPERS[j][0], BUMPERS[j][1], 1.9 + 0.7 * pop, 0.55 + 0.45 * pop];
+        }
+        const e = easeOut(f);
+        return [lerp(BUMPERS[a][0], BUMPERS[b][0], e) * 0.55, lerp(BUMPERS[a][1], BUMPERS[b][1], e) * 0.55, 1.3, 0.95];
+    }),
+    // Progress dots: fill in one by one, do a little wave, then clear out
+    only(5, (j, t) => {
+        const p = frac(t / 3.2);
+        const grow = overshoot(C01((p - 0.05 - j * 0.1) / 0.12));
+        const shrink = C01((p - 0.82 - (4 - j) * 0.025) / 0.08);
+        const s = grow * (1 - shrink);
+        const hop = Math.sin(Math.PI * C01((p - 0.6 - j * 0.02) / 0.16));
+        return [-0.64 + j * 0.32, 0.15 - 0.3 * hop, 1.7 * Math.max(0.05, s), 0.95 * C01(s * 3)];
+    }),
+    // Tic-tac-toe: big dots vs small dots play a real game; the winning line pulses
+    only(7, (j, t) => {
+        const T = 3.8;
+        const h = t / T;
+        const n = Math.floor(h);
+        const ph = (h - n) * T;
+        const G = TTT_GAMES[mod(n, TTT_GAMES.length)];
+        const cell = G.m[j];
+        const wins = G.w.includes(j);
+        const grow = overshoot(C01((ph - 0.12 - j * 0.3) / 0.25));
+        const clear = C01((ph - 3.4) / 0.3);
+        const s = Math.max(0, grow * (1 - easeIn(clear)));
+        const pulse = wins && ph > 2.4 && ph < 3.3 ? Math.pow(Math.sin((Math.PI * (ph - 2.4)) / 0.3), 2) : 0;
+        const dim = wins || ph < 2.4 ? 1 : 1 - 0.6 * C01((ph - 2.4) / 0.2);
+        return [((cell % 3) - 1) * 0.56, (Math.floor(cell / 3) - 1) * 0.56, (j % 2 === 0 ? 2 : 1.25) * s + 0.5 * pulse, 0.95 * C01(s * 3) * dim];
+    }),
 ];
 
 const HOLD = 5.5; // seconds on each pattern
@@ -203,37 +323,81 @@ function localTime(j, tau) {
     return (((tau - origin) % CYCLE) + CYCLE) % CYCLE;
 }
 
-function toFrame(p) {
+// One sample: [translateX, translateY, scaleX, scaleY, opacity].
+function toSample(p) {
     const r = Math.max(0.2, p[2]);
     const sq = p[4];
-    const sx = (r * (2 - sq)) / DOT_CORE;
-    const sy = (r * sq) / DOT_CORE;
-    const cx = MID + p[0] * RANGE;
-    const cy = MID + p[1] * RANGE + r * (1 - sq);
-    return {
-        transform: `translate(${(cx - DOT / 2).toFixed(2)}px,${(cy - DOT / 2).toFixed(2)}px) scale(${sx.toFixed(3)},${sy.toFixed(3)})`,
-        opacity: Number(C01(p[3]).toFixed(3)),
-    };
+    return [
+        MID + p[0] * RANGE - DOT / 2,
+        MID + p[1] * RANGE + r * (1 - sq) - DOT / 2,
+        (r * (2 - sq)) / DOT_CORE,
+        (r * sq) / DOT_CORE,
+        C01(p[3]),
+    ];
+}
+
+// How far the browser's straight-line blend between kept samples may drift from the real
+// motion before a sample has to be kept: 0.04px, a 0.4% size change, or 0.6% opacity.
+const TOLERANCE = [0.04, 0.04, 0.004, 0.004, 0.006];
+const MAX_SPAN = 160; // never go more than 4 seconds between keyframes
+
+function fitsLine(S, a, b) {
+    const span = b - a;
+    for (let i = a + 1; i < b; i++) {
+        const k = (i - a) / span;
+        const op = S[a][4] + (S[b][4] - S[a][4]) * k;
+        if (Math.abs(op - S[i][4]) > TOLERANCE[4]) return false;
+        // Position and size don't matter while the dot is invisible.
+        if (op < TOLERANCE[4] && S[i][4] < TOLERANCE[4]) continue;
+        for (let m = 0; m < 4; m++) {
+            if (Math.abs(S[a][m] + (S[b][m] - S[a][m]) * k - S[i][m]) > TOLERANCE[m]) return false;
+        }
+    }
+    return true;
+}
+
+// Drop every sample the browser would interpolate to the same place anyway.
+function toKeyframes(S) {
+    const last = S.length - 1;
+    const kept = [0];
+    let a = 0;
+    while (a < last) {
+        let b = a + 1;
+        for (let c = a + 2; c <= Math.min(last, a + MAX_SPAN); c++) {
+            if (!fitsLine(S, a, c)) break;
+            b = c;
+        }
+        kept.push(b);
+        a = b;
+    }
+    return kept.map(i => ({
+        offset: i / last,
+        transform: `translate(${S[i][0].toFixed(2)}px,${S[i][1].toFixed(2)}px) scale(${S[i][2].toFixed(3)},${S[i][3].toFixed(3)})`,
+        opacity: Number(S[i][4].toFixed(3)),
+    }));
 }
 
 // Precompute the whole cycle once. The result is handed to the browser's compositor,
 // which plays it at the screen's refresh rate without touching the main thread,
 // so SillyTavern doing work (or a heavy theme) can't make it stutter.
-// The work is done in small slices while the page is idle, so loading never hitches.
-let keyframeCache = null;
-let kfJob = null;
+// Everything is done in small slices while the page is idle, so loading never hitches:
+//   1. sample every pattern and morph, 2. trim the samples down to keyframes, one dot at a time,
+//   3. hand each dot's keyframes to the browser, one dot at a time.
+let samples = null;
+let sampleJob = null;
+const keyframes = new Array(N).fill(null);
 
-function stepKeyframes(keepGoing) {
-    if (keyframeCache) return true;
-    if (!kfJob) {
+function stepSamples(keepGoing) {
+    if (samples) return true;
+    if (!sampleJob) {
         const frames = Math.round(CYCLE * SAMPLES_PER_SEC);
-        kfJob = { f: 0, frames, out: Array.from({ length: N }, () => new Array(frames + 1)) };
+        sampleJob = { f: 0, frames, out: Array.from({ length: N }, () => new Array(frames + 1)) };
     }
-    const { frames, out } = kfJob;
+    const { frames, out } = sampleJob;
     const P = PATTERNS.length;
     const mix = [0, 0, 0, 0, 0];
-    while (kfJob.f <= frames) {
-        const f = kfJob.f++;
+    while (sampleJob.f <= frames) {
+        const f = sampleJob.f++;
         const tau = ((f / frames) * CYCLE) % CYCLE;
         const seg = Math.min(P - 1, Math.floor(tau / SEG));
         const sg = tau - seg * SEG;
@@ -249,26 +413,45 @@ function stepKeyframes(keepGoing) {
             } else {
                 for (let m = 0; m < 5; m++) mix[m] = a[m];
             }
-            out[i][f] = toFrame(mix);
+            out[i][f] = toSample(mix);
         }
         if ((f & 31) === 31 && !keepGoing()) return false;
     }
-    keyframeCache = out;
-    kfJob = null;
+    samples = out;
+    sampleJob = null;
     return true;
 }
 
+function keyframesFor(i) {
+    if (!keyframes[i]) {
+        stepSamples(() => true);
+        keyframes[i] = toKeyframes(samples[i]);
+        samples[i] = null; // free the raw samples once trimmed
+    }
+    return keyframes[i];
+}
+
 function buildKeyframes() {
-    stepKeyframes(() => true);
-    return keyframeCache;
+    for (let i = 0; i < N; i++) keyframesFor(i);
+    return keyframes;
 }
 
 function prebuildWhenIdle() {
     const idle = window.requestIdleCallback
         ? cb => window.requestIdleCallback(cb, { timeout: 4000 })
         : cb => setTimeout(() => cb({ timeRemaining: () => 8 }), 200);
+    let dot = 0;
     const work = deadline => {
-        if (!stepKeyframes(() => deadline.timeRemaining() > 2)) idle(work);
+        const keepGoing = () => deadline.timeRemaining() > 2;
+        // 1. sample the cycle in small slices
+        if (!stepSamples(keepGoing)) return idle(work);
+        // 2. trim one dot's samples into keyframes per idle slice
+        if (dot < N) {
+            keyframesFor(dot++);
+            return idle(work);
+        }
+        // 3. hand one dot's keyframes to the browser per idle slice
+        if (settings().style === 'morph' && ensureMorph() && morph.prepareNext()) idle(work);
     };
     idle(work);
 }
@@ -319,25 +502,39 @@ function createMorph(node, getSpeed) {
         node.appendChild(d);
         dots.push(d);
     }
-    let anims = null;
+    const anims = new Array(N).fill(null);
+    const canAnimate = typeof node.animate === 'function';
+
+    // Hand one dot's keyframes to the browser (paused until a reply starts).
+    function prepare(i) {
+        if (anims[i] || !canAnimate) return;
+        anims[i] = dots[i].animate(keyframesFor(i), {
+            duration: CYCLE * 1000,
+            iterations: Infinity,
+            easing: 'linear',
+        });
+        anims[i].pause();
+    }
 
     return {
+        // Prepares the next unprepared dot; returns false once every dot is ready.
+        prepareNext() {
+            const i = anims.findIndex(a => !a);
+            if (i === -1 || !canAnimate) return false;
+            prepare(i);
+            return anims.some(a => !a);
+        },
         start() {
             const rate = Number(getSpeed()) || 1;
-            if (typeof node.animate !== 'function') {
+            if (!canAnimate) {
                 // Very old browser: show a still frame instead of nothing.
-                const kf = buildKeyframes();
-                dots.forEach((d, i) => Object.assign(d.style, kf[i][0]));
+                dots.forEach((d, i) => {
+                    const { transform, opacity } = keyframesFor(i)[0];
+                    Object.assign(d.style, { transform, opacity });
+                });
                 return;
             }
-            const kf = buildKeyframes();
-            if (!anims) {
-                anims = dots.map((d, i) => d.animate(kf[i], {
-                    duration: CYCLE * 1000,
-                    iterations: Infinity,
-                    easing: 'linear',
-                }));
-            }
+            for (let i = 0; i < N; i++) prepare(i); // only does work if idle prep hasn't finished
             // Next pattern from the shuffled deck; the first change comes a little sooner.
             const startAt = (nextStartPattern() * SEG + 2) * 1000;
             for (const a of anims) {
@@ -348,11 +545,11 @@ function createMorph(node, getSpeed) {
             for (const a of anims) a.play();
         },
         stop() {
-            anims?.forEach(a => a.pause());
+            anims.forEach(a => a?.pause());
         },
         setSpeed(v) {
             const rate = Number(v) || 1;
-            anims?.forEach(a => { a.playbackRate = rate; });
+            anims.forEach(a => { if (a) a.playbackRate = rate; });
         },
     };
 }
@@ -582,6 +779,15 @@ function startWords() {
 
 let morphNode = null;
 
+function ensureMorph() {
+    if (!morphNode) {
+        morphNode = document.createElement('div');
+        morphNode.className = 'tg-anim tg-morph';
+        morph = createMorph(morphNode, () => settings().speed);
+    }
+    return morphNode;
+}
+
 function animMarkup(style) {
     if (style === 'dots') {
         return '<div class="tg-anim tg-dots"><span></span><span></span><span></span></div>';
@@ -609,12 +815,7 @@ function build() {
 
     let anim;
     if (s.style === 'morph') {
-        if (!morphNode) {
-            morphNode = document.createElement('div');
-            morphNode.className = 'tg-anim tg-morph';
-            morph = createMorph(morphNode, () => settings().speed);
-        }
-        anim = morphNode;
+        anim = ensureMorph();
     } else {
         const holder = document.createElement('div');
         holder.innerHTML = animMarkup(s.style);
@@ -834,7 +1035,7 @@ function addSettingsUI() {
                 <label class="checkbox_label"><input type="checkbox" id="tg_enabled"> Enabled</label>
                 <label for="tg_style">Animation</label>
                 <select id="tg_style" class="text_pole">
-                    <option value="morph">Morphing dots (11 patterns)</option>
+                    <option value="morph">Morphing dots (${PATTERNS.length} patterns)</option>
                     <option value="orb">Moon orb</option>
                     <option value="dots">Bouncing dots</option>
                     <option value="shimmer">Shimmer text</option>

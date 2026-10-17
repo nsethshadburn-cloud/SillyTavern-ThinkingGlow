@@ -9,7 +9,7 @@ In SillyTavern open Extensions → Install extension and paste this repo's URL.
 
 ## Settings
 Extensions panel → Thinking Glow (the panel header shows the running version):
-- Animation: Morphing dots (default — 12 dots that glide between 11 patterns, starting on a random one), Moon orb, Bouncing dots, or Shimmer text
+- Animation: Morphing dots (default — 12 dots that glide between 16 patterns, starting on a random one), Moon orb, Bouncing dots, or Shimmer text
 - Speed: 0.6x to 1.8x
 - Rotating words: after "<bot> is thinking…", the label cycles through 178 status words and phrases ("Pondering…", "Untangling the details…") in shuffled order
 - Seconds per word: 2 to 8 (default 4)
