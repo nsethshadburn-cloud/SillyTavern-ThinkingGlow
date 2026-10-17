@@ -6,25 +6,30 @@
 
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     width: fit-content;
-    max-width: calc(100% - 20px);
-    margin: 0 auto 6px;
-    padding: 6px 14px 6px 10px;
-    border-radius: 999px;
-    background: var(--SmartThemeBlurTintColor, rgba(20, 22, 35, 0.6));
-    border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.1));
+    max-width: 100%;
     color: var(--tg-text);
     font-size: 0.9em;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    box-shadow: 0 0 18px -6px var(--tg-accent);
     pointer-events: none;
     transition: opacity 0.25s ease, transform 0.25s ease;
 }
 
-#tg-indicator.tg-hidden { opacity: 0; transform: translateY(6px) scale(0.97); }
-#tg-indicator.tg-gone { display: none; }
+#tg-indicator.tg-hidden { opacity: 0; transform: translateY(4px); }
+
+/* Inside the bot's message bubble */
+#tg-indicator.tg-in-message {
+    margin: 2px 0 4px;
+}
+
+/* Before the bot's bubble exists: its own row at the bottom of the chat */
+#tg-indicator.tg-standalone {
+    margin: 6px 0 10px 12px;
+    padding: 5px 12px 5px 8px;
+    border-radius: 999px;
+    background: var(--SmartThemeBlurTintColor, rgba(20, 22, 35, 0.6));
+    border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.1));
+}
 
 #tg-indicator.tg-floating {
     position: fixed;
@@ -32,12 +37,18 @@
     bottom: 90px;
     translate: -50% 0;
     z-index: 3000;
+    padding: 5px 12px 5px 8px;
+    border-radius: 999px;
+    background: var(--SmartThemeBlurTintColor, rgba(20, 22, 35, 0.6));
 }
 
-.tg-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tg-timer { opacity: 0.6; font-variant-numeric: tabular-nums; font-size: 0.9em; }
+.tg-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0.85; }
+.tg-timer { opacity: 0.55; font-variant-numeric: tabular-nums; font-size: 0.9em; }
 
 .tg-anim { position: relative; flex: none; }
+
+/* Morphing dots */
+.tg-morph { display: block; width: 26px; height: 26px; }
 
 /* Moon orb */
 .tg-orb { width: 22px; height: 22px; }
@@ -46,7 +57,6 @@
     inset: 5px;
     border-radius: 50%;
     background: radial-gradient(circle at 35% 35%, #fff 0%, var(--tg-accent) 55%, transparent 78%);
-    box-shadow: 0 0 10px var(--tg-accent);
     animation: tg-pulse 1.8s ease-in-out infinite;
 }
 .tg-orb-ring { position: absolute; inset: 0; animation: tg-spin 1.6s linear infinite; }
@@ -60,7 +70,6 @@
     margin-left: -2px;
     border-radius: 50%;
     background: var(--tg-accent);
-    box-shadow: 0 0 6px var(--tg-accent);
 }
 
 /* Bouncing dots */
@@ -81,7 +90,6 @@
     height: 8px;
     border-radius: 50%;
     background: var(--tg-accent);
-    box-shadow: 0 0 8px var(--tg-accent);
     animation: tg-pulse 1.4s ease-in-out infinite;
 }
 #tg-indicator[data-style="shimmer"] .tg-label {
@@ -113,6 +121,3 @@
 @media (prefers-reduced-motion: reduce) {
     #tg-indicator *, #tg-indicator .tg-label { animation: none !important; }
 }
-
-/* Morphing dots canvas */
-.tg-morph { display: block; width: 26px; height: 26px; }

@@ -1,6 +1,6 @@
 # Thinking Glow
 
-A SillyTavern extension that shows an animated "thinking" pill above the input box while the bot is generating. It disappears the moment visible text starts streaming in, so hidden reasoning stays hidden. Colors come from your active theme.
+A SillyTavern extension that shows an animated "thinking" indicator inside the bot's message while it's generating (as its own row at the bottom of the chat until the bubble appears). It disappears the moment visible text starts streaming in, so hidden reasoning stays hidden. Colors come from your active theme.
 
 ## Install
 Either:

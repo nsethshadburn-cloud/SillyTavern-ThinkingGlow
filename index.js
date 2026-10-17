@@ -1,5 +1,5 @@
 // Thinking Glow
-// Shows an animated "thinking" pill above the input box while the bot is generating,
+// Shows an animated "thinking" indicator inside the bot's message while it's generating,
 // and hides it the moment visible text starts streaming in (hidden reasoning stays hidden).
 
 const MODULE = 'thinking_glow';
@@ -13,6 +13,8 @@ let pendingShow = null;
 let startedAt = 0;
 let gotToken = false;
 let active = false;
+let previewMode = false;
+let lastSecond = -1;
 
 const ctx = () => SillyTavern.getContext();
 
@@ -139,11 +141,32 @@ const PATTERNS = [
 const HOLD = 5.5; // seconds on each pattern
 const FADE = 1.4; // seconds to morph into the next
 
+// A glowing dot is drawn once into a small sprite and then stamped for every dot,
+// which is far cheaper than a live canvas blur on every dot every frame.
+const SPRITE_SIZE = 64;
+const SPRITE_CORE = 0.22; // core radius as a fraction of the sprite
+const SPRITE_SCALE = 0.5 / SPRITE_CORE; // sprite half-size relative to the core radius
+
+function makeSprite(color) {
+    const c = document.createElement('canvas');
+    c.width = SPRITE_SIZE;
+    c.height = SPRITE_SIZE;
+    const g = c.getContext('2d');
+    g.fillStyle = color;
+    g.shadowColor = color;
+    g.shadowBlur = SPRITE_SIZE * 0.16;
+    g.beginPath();
+    g.arc(SPRITE_SIZE / 2, SPRITE_SIZE / 2, SPRITE_SIZE * SPRITE_CORE, 0, TAU);
+    g.fill();
+    return c;
+}
+
 function createMorph(canvas, getColor, getSpeed) {
     const c2d = canvas.getContext('2d');
+    const p = [0, 0, 0, 0, 0];
     let raf = 0;
     let size = 26;
-    let color = '#AFA9EC';
+    let sprite = null;
     let cur = 0;
     let nxt = 1;
     let t0 = 0;
@@ -152,7 +175,7 @@ function createMorph(canvas, getColor, getSpeed) {
     let last = 0;
 
     function resize() {
-        const dpr = window.devicePixelRatio || 1;
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
         size = canvas.clientWidth || 26;
         canvas.width = Math.round(size * dpr);
         canvas.height = Math.round(size * dpr);
@@ -164,28 +187,29 @@ function createMorph(canvas, getColor, getSpeed) {
         const R = size / 2 - 3 * s;
         const m = size / 2;
         c2d.clearRect(0, 0, size, size);
-        c2d.fillStyle = color;
-        c2d.shadowColor = color;
-        c2d.shadowBlur = 6 * s;
         for (let i = 0; i < N; i++) {
-            let p = PATTERNS[cur](i, t);
+            const a = PATTERNS[cur](i, t);
             if (k > 0) {
-                const q = PATTERNS[nxt](i, t);
-                p = p.map((v, j) => v + (q[j] - v) * k);
+                const b = PATTERNS[nxt](i, t);
+                for (let j = 0; j < 5; j++) p[j] = a[j] + (b[j] - a[j]) * k;
+            } else {
+                for (let j = 0; j < 5; j++) p[j] = a[j];
             }
             const alpha = C01(p[3]);
             if (alpha < 0.01) continue;
             const r = Math.max(0.2, p[2]) * s;
             const sq = p[4];
+            const rx = r * (2 - sq) * SPRITE_SCALE;
+            const ry = r * sq * SPRITE_SCALE;
+            const cx = m + p[0] * R;
+            const cy = m + p[1] * R + r * (1 - sq);
             c2d.globalAlpha = alpha;
-            c2d.beginPath();
-            c2d.ellipse(m + p[0] * R, m + p[1] * R + r * (1 - sq), r * (2 - sq), r * sq, 0, 0, TAU);
-            c2d.fill();
+            c2d.drawImage(sprite, cx - rx, cy - ry, rx * 2, ry * 2);
         }
     }
 
     function frame(now) {
-        const dt = last ? (now - last) / 1000 : 0;
+        const dt = last ? Math.min(0.1, (now - last) / 1000) : 0;
         last = now;
         animT += dt * (getSpeed() || 1);
         const t = (now - t0) / 1000;
@@ -205,7 +229,7 @@ function createMorph(canvas, getColor, getSpeed) {
         start() {
             cancelAnimationFrame(raf);
             resize();
-            color = getColor() || color;
+            sprite = makeSprite(getColor() || '#AFA9EC');
             cur = Math.floor(Math.random() * PATTERNS.length);
             nxt = (cur + 1) % PATTERNS.length;
             t0 = performance.now();
@@ -243,16 +267,9 @@ function build() {
     if (!el) {
         el = document.createElement('div');
         el.id = 'tg-indicator';
-        el.className = 'tg-hidden tg-gone';
+        el.className = 'tg-hidden';
         el.setAttribute('role', 'status');
         el.setAttribute('aria-live', 'polite');
-        const sendForm = document.getElementById('send_form');
-        if (sendForm && sendForm.parentElement) {
-            sendForm.parentElement.insertBefore(el, sendForm);
-        } else {
-            el.classList.add('tg-floating');
-            document.body.appendChild(el);
-        }
     }
     morph?.stop();
     morph = null;
@@ -262,6 +279,7 @@ function build() {
     const label = s.showName ? `${escapeHtml(name)} is thinking` : 'Thinking';
     el.innerHTML = `${animMarkup(s.style)}<span class="tg-label">${label}</span>`
         + (s.showTimer ? '<span class="tg-timer">0s</span>' : '');
+    lastSecond = -1;
 
     const canvas = el.querySelector('canvas.tg-morph');
     if (canvas) {
@@ -273,19 +291,29 @@ function build() {
     }
 }
 
-function fmt(ms) {
-    const t = Math.floor(ms / 1000);
-    if (t < 60) return `${t}s`;
-    return `${Math.floor(t / 60)}m ${String(t % 60).padStart(2, '0')}s`;
+function fmt(sec) {
+    if (sec < 60) return `${sec}s`;
+    return `${Math.floor(sec / 60)}m ${String(sec % 60).padStart(2, '0')}s`;
+}
+
+function lastMessage() {
+    const chat = document.getElementById('chat');
+    if (!chat) return null;
+    let node = chat.lastElementChild;
+    while (node && !node.classList.contains('mes')) node = node.previousElementSibling;
+    return node;
+}
+
+function hasVisibleText(mes) {
+    const txt = mes?.querySelector('.mes_text')?.textContent ?? '';
+    return !/^[\s.…]*$/.test(txt);
 }
 
 // True once the message being streamed has real, visible text in it.
 function lastMessageHasText() {
-    const msgs = document.querySelectorAll('#chat .mes');
-    const last = msgs[msgs.length - 1];
-    if (!last || last.getAttribute('is_user') === 'true') return false;
-    const txt = last.querySelector('.mes_text')?.textContent ?? '';
-    return !/^[\s.…]*$/.test(txt);
+    const mes = lastMessage();
+    if (!mes || mes.getAttribute('is_user') === 'true') return false;
+    return hasVisibleText(mes);
 }
 
 // Fallback: SillyTavern shows a stop button while generating.
@@ -295,12 +323,49 @@ function generationRunning() {
     return getComputedStyle(stop).display !== 'none';
 }
 
+// Put the indicator inside the bot's message once that bubble exists;
+// until then, show it as its own row at the bottom of the chat.
+function place() {
+    if (!el) return;
+    const chat = document.getElementById('chat');
+    const mes = lastMessage();
+    const isBotBubble = mes
+        && mes.getAttribute('is_user') !== 'true'
+        && mes.getAttribute('is_system') !== 'true'
+        && !hasVisibleText(mes);
+
+    if (!previewMode && isBotBubble) {
+        const text = mes.querySelector('.mes_text');
+        if (text && el.previousElementSibling !== text) {
+            text.after(el);
+        }
+        el.classList.add('tg-in-message');
+        el.classList.remove('tg-standalone', 'tg-floating');
+        return;
+    }
+
+    el.classList.remove('tg-in-message');
+    if (chat) {
+        if (el.parentElement !== chat || el !== chat.lastElementChild) {
+            const nearBottom = chat.scrollHeight - chat.scrollTop - chat.clientHeight < 150;
+            chat.appendChild(el);
+            if (nearBottom) chat.scrollTop = chat.scrollHeight;
+        }
+        el.classList.add('tg-standalone');
+        el.classList.remove('tg-floating');
+    } else if (el.parentElement !== document.body) {
+        document.body.appendChild(el);
+        el.classList.add('tg-floating');
+    }
+}
+
 function show({ preview = false, since = null } = {}) {
     clearTimeout(hideTimer);
+    previewMode = preview;
     build();
     startedAt = since ?? Date.now();
     active = true;
-    el.classList.remove('tg-gone');
+    place();
     void el.offsetWidth; // restart the fade-in
     el.classList.remove('tg-hidden');
     morph?.start();
@@ -308,16 +373,21 @@ function show({ preview = false, since = null } = {}) {
     clearInterval(tick);
     tick = setInterval(() => {
         const elapsed = Date.now() - startedAt;
-        const timer = el.querySelector('.tg-timer');
-        if (timer) timer.textContent = fmt(elapsed);
+        const sec = Math.floor(elapsed / 1000);
+        if (sec !== lastSecond) {
+            lastSecond = sec;
+            const timer = el.querySelector('.tg-timer');
+            if (timer) timer.textContent = fmt(sec);
+        }
 
         if (preview) {
             if (elapsed > 10000) hide();
             return;
         }
         if (gotToken && lastMessageHasText()) return hide();
-        if (elapsed > 1500 && !generationRunning()) hide();
-    }, 200);
+        if (elapsed > 1500 && !generationRunning()) return hide();
+        place();
+    }, 120);
 }
 
 function hide() {
@@ -327,8 +397,8 @@ function hide() {
     el.classList.add('tg-hidden');
     clearTimeout(hideTimer);
     hideTimer = setTimeout(() => {
-        el.classList.add('tg-gone');
         morph?.stop();
+        el.remove();
     }, 300);
 }
 
@@ -387,31 +457,29 @@ function addSettingsUI() {
     $('#extensions_settings2').append(html);
 
     const speedOut = () => $('#tg_speed_out').text(`${Number(s.speed).toFixed(1)}x`);
+    const delayOut = () => $('#tg_delay_out').text(`${(Number(s.delay) / 1000).toFixed(1)}s`);
+    const rebuildIfActive = () => { if (active) { build(); place(); morph?.start(); } };
 
     $('#tg_enabled').prop('checked', s.enabled).on('change', function () {
         s.enabled = this.checked; save();
         if (!s.enabled) hide();
     });
     $('#tg_style').val(s.style).on('change', function () {
-        s.style = this.value; save();
-        if (active) { build(); morph?.start(); }
+        s.style = this.value; save(); rebuildIfActive();
     });
     $('#tg_speed').val(s.speed).on('input', function () {
         s.speed = Number(this.value); speedOut(); save();
     });
     speedOut();
-    const delayOut = () => $('#tg_delay_out').text(`${(Number(s.delay) / 1000).toFixed(1)}s`);
     $('#tg_delay').val(s.delay).on('input', function () {
         s.delay = Number(this.value); delayOut(); save();
     });
     delayOut();
     $('#tg_timer').prop('checked', s.showTimer).on('change', function () {
-        s.showTimer = this.checked; save();
-        if (active) { build(); morph?.start(); }
+        s.showTimer = this.checked; save(); rebuildIfActive();
     });
     $('#tg_name').prop('checked', s.showName).on('change', function () {
-        s.showName = this.checked; save();
-        if (active) { build(); morph?.start(); }
+        s.showName = this.checked; save(); rebuildIfActive();
     });
     $('#tg_preview').on('click', () => show({ preview: true }));
 }
