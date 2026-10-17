@@ -3,10 +3,10 @@
 // and hides it the moment visible text starts streaming in (hidden reasoning stays hidden).
 // Loaded by glow.js with a version stamp so browsers never run a stale copy.
 
-const VERSION = '1.6.0';
+const VERSION = '1.7.0';
 
 const MODULE = 'thinking_glow';
-const DEFAULTS = { enabled: true, style: 'morph', speed: 1, delay: 500, showTimer: true, showName: true };
+const DEFAULTS = { enabled: true, style: 'morph', speed: 1, delay: 500, rotateWords: true, wordSeconds: 4, showTimer: true, showName: true };
 
 let el = null;
 let morph = null;
@@ -273,41 +273,43 @@ function prebuildWhenIdle() {
     idle(work);
 }
 
-// Starting patterns are dealt from a shuffled deck: every pattern comes up once before any
-// repeats, a new deck never opens with the one you just saw, and the deck survives reloads.
-const DECK_KEY = 'thinking_glow_deck';
-let deck = [];
-let lastStart = -1;
-try {
-    const saved = JSON.parse(localStorage.getItem(DECK_KEY) || 'null');
-    if (saved && Array.isArray(saved.deck)) {
-        deck = saved.deck.filter(i => Number.isInteger(i) && i >= 0 && i < PATTERNS.length);
-        lastStart = Number.isInteger(saved.lastStart) ? saved.lastStart : -1;
+// Shuffled decks: every item comes up once before any repeats, a new deck never opens with
+// the one you just saw, and the deck's place survives page reloads.
+function makeDeck(size, storageKey) {
+    let deck = [];
+    let last = -1;
+    try {
+        const saved = JSON.parse(localStorage.getItem(storageKey) || 'null');
+        if (saved && Array.isArray(saved.deck)) {
+            deck = saved.deck.filter(i => Number.isInteger(i) && i >= 0 && i < size);
+            last = Number.isInteger(saved.last) ? saved.last : -1;
+        }
+    } catch {
+        // Storage unavailable; the deck just starts fresh.
     }
-} catch {
-    // Storage unavailable; the deck just starts fresh.
+    return function next() {
+        if (!deck.length) {
+            deck = Array.from({ length: size }, (_, i) => i);
+            for (let i = deck.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [deck[i], deck[j]] = [deck[j], deck[i]];
+            }
+            // Cards are drawn from the end; don't open the new deck with the last one shown.
+            if (deck.length > 1 && deck[deck.length - 1] === last) {
+                [deck[0], deck[deck.length - 1]] = [deck[deck.length - 1], deck[0]];
+            }
+        }
+        last = deck.pop();
+        try {
+            localStorage.setItem(storageKey, JSON.stringify({ deck, last }));
+        } catch {
+            // Ignore storage errors.
+        }
+        return last;
+    };
 }
 
-function nextStartPattern() {
-    if (!deck.length) {
-        deck = PATTERNS.map((_, i) => i);
-        for (let i = deck.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [deck[i], deck[j]] = [deck[j], deck[i]];
-        }
-        // Cards are drawn from the end; don't open the new deck with the last one shown.
-        if (deck.length > 1 && deck[deck.length - 1] === lastStart) {
-            [deck[0], deck[deck.length - 1]] = [deck[deck.length - 1], deck[0]];
-        }
-    }
-    lastStart = deck.pop();
-    try {
-        localStorage.setItem(DECK_KEY, JSON.stringify({ deck, lastStart }));
-    } catch {
-        // Ignore storage errors.
-    }
-    return lastStart;
-}
+const nextStartPattern = makeDeck(PATTERNS.length, 'thinking_glow_deck');
 
 function createMorph(node, getSpeed) {
     const dots = [];
@@ -356,6 +358,225 @@ function createMorph(node, getSpeed) {
 }
 
 // ---------------------------------------------------------------------------
+// Rotating words: after "<bot> is thinking…", the label cycles through these.
+// ---------------------------------------------------------------------------
+
+const PHRASES = [
+    "pondering",
+    "mulling it over",
+    "connecting the dots",
+    "weighing the options",
+    "choosing words carefully",
+    "gathering thoughts",
+    "reading between the lines",
+    "considering every angle",
+    "piecing it together",
+    "sorting through ideas",
+    "thinking it through",
+    "chewing on that",
+    "working it out",
+    "untangling the details",
+    "following a hunch",
+    "drafting a reply",
+    "finding the right words",
+    "lost in thought",
+    "deep in thought",
+    "contemplating",
+    "ruminating",
+    "deliberating",
+    "reflecting",
+    "musing",
+    "cogitating",
+    "noodling on it",
+    "puzzling it out",
+    "figuring it out",
+    "sizing it up",
+    "taking it all in",
+    "processing",
+    "reasoning it out",
+    "weighing every word",
+    "lining up thoughts",
+    "organizing ideas",
+    "plotting the next move",
+    "mapping it out",
+    "sketching a response",
+    "rehearsing the answer",
+    "picking the perfect phrasing",
+    "double-checking",
+    "second-guessing a little",
+    "reading the room",
+    "replaying the conversation",
+    "recalling the details",
+    "digging deeper",
+    "peeling back the layers",
+    "looking at it sideways",
+    "turning it over",
+    "cooking something up",
+    "brewing an answer",
+    "simmering on it",
+    "letting it marinate",
+    "chasing a thought",
+    "catching a stray idea",
+    "herding thoughts",
+    "wrangling words",
+    "assembling a reply",
+    "building a response",
+    "stitching words together",
+    "weaving a reply",
+    "crafting a response",
+    "shaping the answer",
+    "fine-tuning the details",
+    "connecting the threads",
+    "following the thread",
+    "tracing the logic",
+    "gathering the pieces",
+    "weighing pros and cons",
+    "deciding what to say",
+    "choosing a direction",
+    "considering the possibilities",
+    "imagining the outcome",
+    "picturing the scene",
+    "setting the scene",
+    "staring into space",
+    "taking a deep breath",
+    "taking a moment",
+    "thinking hard",
+    "thinking really hard",
+    "overthinking it",
+    "thinking very carefully",
+    "putting thoughts in order",
+    "filling in the blanks",
+    "rereading the last message",
+    "studying the situation",
+    "analyzing",
+    "calculating",
+    "scheming",
+    "plotting",
+    "strategizing",
+    "hatching a plan",
+    "working on a comeback",
+    "coming up with something good",
+    "searching for inspiration",
+    "waiting for inspiration",
+    "finding the spark",
+    "consulting the inner monologue",
+    "consulting the muse",
+    "having a think",
+    "having a long think",
+    "buffering",
+    "warming up",
+    "gearing up",
+    "turning the gears",
+    "oiling the gears",
+    "firing up the neurons",
+    "rallying the brain cells",
+    "summoning the right words",
+    "conjuring a reply",
+    "pulling it all together",
+    "tying up loose ends",
+    "smoothing out the wording",
+    "editing mentally",
+    "revising the draft",
+    "scrapping the first draft",
+    "starting the draft over",
+    "jotting down ideas",
+    "making a mental list",
+    "checking the list twice",
+    "going over the details",
+    "going down a rabbit hole",
+    "exploring a tangent",
+    "getting back on track",
+    "zeroing in",
+    "narrowing it down",
+    "honing in",
+    "focusing",
+    "concentrating",
+    "locking in",
+    "in the zone",
+    "reading the vibes",
+    "checking the vibes",
+    "feeling it out",
+    "testing a theory",
+    "running a simulation",
+    "doing the math",
+    "counting to ten",
+    "humming thoughtfully",
+    "stroking an imaginary beard",
+    "squinting thoughtfully",
+    "staring at the ceiling",
+    "pacing back and forth",
+    "trying not to overthink",
+    "building suspense",
+    "keeping you in suspense",
+    "almost there",
+    "nearly there",
+    "getting close",
+    "adding the final touches",
+    "wrapping up the thought",
+    "polishing it up",
+    "just about ready",
+    "connecting a few more dots",
+    "untying a mental knot",
+    "flipping through memories",
+    "mining for ideas",
+    "sifting through possibilities",
+    "spinning up an idea",
+    "toying with an idea",
+    "entertaining a thought",
+    "chasing down a detail",
+    "reading it one more time",
+    "sharpening the point",
+    "trimming the fat",
+    "finding the punchline",
+    "picking up the thread",
+    "laying the groundwork",
+    "setting up the payoff",
+    "thinking two steps ahead",
+    "playing out scenarios",
+    "running through options",
+    "taking notes",
+    "cracking the code",
+    "making sense of it all",
+    "getting the story straight",
+    "lining up the next line",
+    "mulling and musing",
+];
+
+const nextPhrase = makeDeck(PHRASES.length, 'thinking_glow_words');
+let wordTimer = null;
+let swapTimer = null;
+
+const asStatus = phrase => `${phrase.charAt(0).toUpperCase()}${phrase.slice(1)}…`;
+
+function stopWords() {
+    clearInterval(wordTimer);
+    clearTimeout(swapTimer);
+    wordTimer = null;
+}
+
+function swapWord() {
+    const label = el?.querySelector('.tg-label');
+    if (!label) return;
+    label.classList.add('tg-swap-out');
+    clearTimeout(swapTimer);
+    swapTimer = setTimeout(() => {
+        label.textContent = asStatus(PHRASES[nextPhrase()]);
+        label.classList.remove('tg-swap-out');
+        label.classList.add('tg-swap-in');
+        void label.offsetWidth; // start the fade-in from below
+        label.classList.remove('tg-swap-in');
+    }, 220);
+}
+
+function startWords() {
+    stopWords();
+    const s = settings();
+    if (!s.rotateWords) return;
+    const ms = Math.max(1000, Number(s.wordSeconds) * 1000 || 4000);
+    wordTimer = setInterval(swapWord, ms);
+}
+
+// ---------------------------------------------------------------------------
 // Indicator
 // ---------------------------------------------------------------------------
 
@@ -377,10 +598,11 @@ function build() {
         el = document.createElement('div');
         el.id = 'tg-indicator';
         el.className = 'tg-hidden';
-        el.setAttribute('role', 'status');
-        el.setAttribute('aria-live', 'polite');
+        // Not a live region: the rotating words would otherwise be read out every few seconds.
+        el.setAttribute('aria-live', 'off');
     }
     morph?.stop();
+    stopWords();
 
     el.dataset.style = s.style;
     el.textContent = '';
@@ -402,7 +624,7 @@ function build() {
 
     const label = document.createElement('span');
     label.className = 'tg-label';
-    label.textContent = s.showName ? `${ctx().name2 || 'Bot'} is thinking` : 'Thinking';
+    label.textContent = s.showName ? `${ctx().name2 || 'Bot'} is thinking…` : 'Thinking…';
     el.appendChild(label);
 
     if (s.showTimer) {
@@ -527,6 +749,7 @@ function show({ preview = false, since = null } = {}) {
     void el.offsetWidth; // restart the fade-in
     el.classList.remove('tg-hidden');
     startAnimation();
+    startWords();
 
     clearInterval(tick);
     tick = setInterval(() => {
@@ -552,6 +775,7 @@ function hide() {
     if (!el) return;
     active = false;
     clearInterval(tick);
+    stopWords();
     el.classList.add('tg-hidden');
     markWaiting(null);
     clearTimeout(hideTimer);
@@ -619,6 +843,9 @@ function addSettingsUI() {
                 <input type="range" id="tg_speed" min="0.6" max="1.8" step="0.1">
                 <label for="tg_delay">Show after: <span id="tg_delay_out"></span></label>
                 <input type="range" id="tg_delay" min="0" max="2000" step="100">
+                <label class="checkbox_label"><input type="checkbox" id="tg_words"> Rotating words (${PHRASES.length} of them)</label>
+                <label for="tg_word_secs">Seconds per word: <span id="tg_word_secs_out"></span></label>
+                <input type="range" id="tg_word_secs" min="2" max="8" step="0.5">
                 <label class="checkbox_label"><input type="checkbox" id="tg_timer"> Show elapsed time</label>
                 <label class="checkbox_label"><input type="checkbox" id="tg_name"> Show character name</label>
                 <div id="tg_preview" class="menu_button">Preview</div>
@@ -629,7 +856,7 @@ function addSettingsUI() {
 
     const speedOut = () => $('#tg_speed_out').text(`${Number(s.speed).toFixed(1)}x`);
     const delayOut = () => $('#tg_delay_out').text(`${(Number(s.delay) / 1000).toFixed(1)}s`);
-    const rebuildIfActive = () => { if (active) { build(); place(); startAnimation(); } };
+    const rebuildIfActive = () => { if (active) { build(); place(); startAnimation(); startWords(); } };
 
     $('#tg_enabled').prop('checked', s.enabled).on('change', function () {
         s.enabled = this.checked; save();
@@ -643,6 +870,16 @@ function addSettingsUI() {
         morph?.setSpeed(s.speed);
     });
     speedOut();
+    const wordSecsOut = () => $('#tg_word_secs_out').text(`${Number(s.wordSeconds).toFixed(1)}s`);
+    $('#tg_words').prop('checked', s.rotateWords).on('change', function () {
+        s.rotateWords = this.checked; save();
+        if (active) startWords();
+    });
+    $('#tg_word_secs').val(s.wordSeconds).on('input', function () {
+        s.wordSeconds = Number(this.value); wordSecsOut(); save();
+        if (active) startWords();
+    });
+    wordSecsOut();
     $('#tg_delay').val(s.delay).on('input', function () {
         s.delay = Number(this.value); delayOut(); save();
     });

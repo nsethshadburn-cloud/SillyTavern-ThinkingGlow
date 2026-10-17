@@ -49,7 +49,17 @@
     background: var(--SmartThemeBlurTintColor, rgba(20, 22, 35, 0.6));
 }
 
-.tg-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0.85; }
+.tg-label {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0.85;
+    transition: opacity 0.22s ease, transform 0.22s ease;
+}
+/* Rotating words: fade up and out, then fade in from below */
+.tg-label.tg-swap-out { opacity: 0; transform: translateY(-4px); }
+.tg-label.tg-swap-in { opacity: 0; transform: translateY(4px); transition: none; }
 .tg-timer { opacity: 0.55; font-variant-numeric: tabular-nums; font-size: 0.9em; min-width: 2.6em; }
 
 .tg-anim { position: relative; flex: none; }
